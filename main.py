@@ -229,8 +229,8 @@ class AttendanceSystem:
 
 def get_settings():
     return {
-        'IP_ADDRESS': '10.10.3.245',
-        'API_BASE_URL': 'https://permithub.pelangiservice.com/api/v1',
+        'IP_ADDRESS': '10.10.3.226',
+        'API_BASE_URL': 'https://bakery-autism-discharge.ngrok-free.dev',
         'API_KEY': 'GDb5Yd5P2t2qEXj5jx4R6XEy'
     }
 

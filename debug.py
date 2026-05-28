@@ -45,26 +45,32 @@ def test_connection(ip, port=4370, timeout=20, password=0):
 
 def show_device_info(zk):
     console.print("\n[bold cyan]Device Information[/bold cyan]")
-    try:
-        fw = zk.get_firmware()
-        serial = zk.get_serialnumber()
-        device_name = zk.get_device_name()
-        user_count = zk.get_user_count()
-        att_count = zk.get_attendance_count()
 
+    rows = []
+    for attr, label in [
+        ('get_firmware', 'Firmware'),
+        ('get_serialnumber', 'Serial Number'),
+        ('get_device_name', 'Device Name'),
+        ('get_user_count', 'User Count'),
+        ('get_attendance_count', 'Attendance Count'),
+    ]:
+        method = getattr(zk, attr, None)
+        if method:
+            try:
+                val = method()
+                rows.append((label, str(val)))
+            except Exception:
+                rows.append((label, "[red]Error[/red]"))
+        else:
+            rows.append((label, "[dim]N/A[/dim]"))
+
+    if rows:
         table = Table(box=box.ROUNDED)
         table.add_column("Property", style="cyan")
         table.add_column("Value", style="green")
-
-        table.add_row("Device Name", str(device_name))
-        table.add_row("Firmware", str(fw))
-        table.add_row("Serial Number", str(serial))
-        table.add_row("User Count", str(user_count))
-        table.add_row("Attendance Count", str(att_count))
-
+        for label, val in rows:
+            table.add_row(label, val)
         console.print(table)
-    except Exception as e:
-        logger.error(f"Could not retrieve device info: {e}")
 
 
 def show_employees(zk):
