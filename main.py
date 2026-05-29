@@ -182,10 +182,11 @@ class FingerprintDevice:
 
 
 class AttendanceSystem:
-    def __init__(self, ip_address, api_base_url, api_key):
+    def __init__(self, ip_address, api_base_url, api_key, company_id=None):
         self.device = FingerprintDevice(ip_address)
         self.api = MyRequests(api_base_url, api_key)
         self.api_v3 = MyRequests(api_base_url.replace('/v1', '/v3'), api_key)
+        self.company_id = company_id
 
     def clear_log(self):
         return self.api_v3.post_request('/clear-log', payload='')
@@ -212,6 +213,10 @@ class AttendanceSystem:
             console.print("[yellow]No new employees to upload.")
             return True
 
+        if self.company_id:
+            for emp in new_employees:
+                emp['company_id'] = self.company_id
+
         result = self.api.post_request('/records/employees', payload=new_employees)
         return result is not None
 
@@ -223,6 +228,11 @@ class AttendanceSystem:
             return False
 
         self.clear_log()
+
+        if self.company_id:
+            for clock in data['clock']:
+                clock['company_id'] = self.company_id
+
         result = self.api.post_request('/records/clocks', payload=data['clock'])
         return result is not None
 
@@ -230,8 +240,9 @@ class AttendanceSystem:
 def get_settings():
     return {
         'IP_ADDRESS': '10.10.3.226',
-        'API_BASE_URL': 'https://bakery-autism-discharge.ngrok-free.dev',
-        'API_KEY': 'GDb5Yd5P2t2qEXj5jx4R6XEy'
+        'API_BASE_URL': 'https://accounting-dev.dotcomsolution.co.id/api/v1',
+        'API_KEY': 'GDb5Yd5P2t2qEXj5jx4R6XEy',
+        'COMPANY_ID': 1
     }
 
 
@@ -282,7 +293,12 @@ def show_menu():
 
 def main():
     settings = get_settings()
-    system = AttendanceSystem(settings['IP_ADDRESS'], settings['API_BASE_URL'], settings['API_KEY'])
+    system = AttendanceSystem(
+        settings['IP_ADDRESS'],
+        settings['API_BASE_URL'],
+        settings['API_KEY'],
+        settings.get('COMPANY_ID')
+    )
 
     while True:
         choice = show_menu()
