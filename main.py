@@ -182,8 +182,8 @@ class FingerprintDevice:
 
 
 class AttendanceSystem:
-    def __init__(self, ip_address, api_base_url, api_key, company_id=None):
-        self.device = FingerprintDevice(ip_address)
+    def __init__(self, ip_address, api_base_url, api_key, company_id=None, port=4370):
+        self.device = FingerprintDevice(ip_address, port=port)
         self.api = MyRequests(api_base_url, api_key)
         self.api_v3 = MyRequests(api_base_url.replace('/v1', '/v3'), api_key)
         self.company_id = company_id
@@ -237,13 +237,47 @@ class AttendanceSystem:
         return result is not None
 
 
-def get_settings():
-    return {
-        'IP_ADDRESS': '10.10.3.226',
-        'API_BASE_URL': 'https://accounting-dev.dotcomsolution.co.id/api/v1',
-        'API_KEY': 'GDb5Yd5P2t2qEXj5jx4R6XEy',
-        'COMPANY_ID': 1
-    }
+CONFIG_FILE = 'config.json'
+
+DEFAULT_CONFIG = {
+    "device_ip": "10.10.3.226",
+    "device_port": 4370,
+    "api_base_url": "https://accounting-dev.dotcomsolution.co.id/api/v1",
+    "api_key": "GDb5Yd5P2t2qEXj5jx4R6XEy",
+    "company_id": 1
+}
+
+
+def load_config():
+    try:
+        with open(CONFIG_FILE, 'r') as f:
+            config = json.load(f)
+            for key, value in DEFAULT_CONFIG.items():
+                if key not in config:
+                    config[key] = value
+            return config
+    except (FileNotFoundError, json.JSONDecodeError):
+        return DEFAULT_CONFIG.copy()
+
+
+def test_device_connection(config):
+    console.print("\n[cyan]Testing device connection...")
+    device = FingerprintDevice(config['device_ip'], port=config.get('device_port', 4370))
+    if device.connect():
+        console.print(f"[green]Connected to device at {config['device_ip']}:{config.get('device_port', 4370)}")
+        device.disconnect()
+    else:
+        console.print(f"[red]Failed to connect to device at {config['device_ip']}:{config.get('device_port', 4370)}")
+
+
+def test_api_connection(config):
+    console.print("\n[cyan]Testing API connection...")
+    api = MyRequests(config['api_base_url'], config['api_key'])
+    result = api.get_request('/records/employees')
+    if result is not None:
+        console.print(f"[green]API connection successful: {config['api_base_url']}")
+    else:
+        console.print(f"[red]API connection failed: {config['api_base_url']}")
 
 
 def import_all(system):
@@ -279,25 +313,27 @@ def show_menu():
     console.print("1. Import All Data")
     console.print("2. Import Employee Data")
     console.print("3. Import Attendance Data")
+    console.print("4. Test Connection")
     console.print("0. Exit")
 
     while True:
         try:
-            choice = input("\nEnter your choice (0-3): ")
-            if choice in ['0', '1', '2', '3']:
+            choice = input("\nEnter your choice (0-4): ")
+            if choice in ['0', '1', '2', '3', '4']:
                 return choice
-            console.print("[red]Invalid choice. Please enter a number between 0 and 3.")
+            console.print("[red]Invalid choice. Please enter a number between 0 and 4.")
         except ValueError:
             console.print("[red]Invalid input. Please enter a number.")
 
 
 def main():
-    settings = get_settings()
+    config = load_config()
     system = AttendanceSystem(
-        settings['IP_ADDRESS'],
-        settings['API_BASE_URL'],
-        settings['API_KEY'],
-        settings.get('COMPANY_ID')
+        config['device_ip'],
+        config['api_base_url'],
+        config['api_key'],
+        config.get('company_id'),
+        port=config.get('device_port', 4370)
     )
 
     while True:
@@ -312,6 +348,9 @@ def main():
             import_employee(system)
         elif choice == '3':
             import_attendance(system)
+        elif choice == '4':
+            test_device_connection(config)
+            test_api_connection(config)
 
         input("\nPress Enter to continue...")
 
