@@ -8,6 +8,7 @@ from zk import ZK
 from rich.console import Console
 from rich.progress import Progress
 import sys
+import os
 import logging
 from rich.logging import RichHandler
 import time
@@ -48,6 +49,10 @@ class MyRequests:
             logger.error("Error: Payload is empty")
             return None
 
+        if isinstance(payload, list) and len(payload) == 0:
+            logger.warning("Payload is an empty list, skipping POST")
+            return []
+
         url = self.base_url + endpoint
         try:
             if isinstance(payload, list) and len(payload) > 100:
@@ -58,25 +63,31 @@ class MyRequests:
             logger.error(f"Error in post request: {str(e)}")
             return None
 
-    def _batch_post(self, url, payload):
+    def _batch_post(self, url, payload, max_retries=3):
         batch_size = 100
         batches = [payload[i:i + batch_size] for i in range(0, len(payload), batch_size)]
         responses = []
 
         console.print("[cyan]Uploading data in batches...")
         for i, batch in enumerate(batches, 1):
-            try:
-                console.print(f"Processing batch {i}/{len(batches)}")
-                json_payload = json.dumps(batch)
-                response = requests.post(url, data=json_payload, headers=self.headers)
-                response.raise_for_status()
-                responses.append(response.json() if 'application/json' in response.headers.get('Content-Type',
-                                                                                               '') else response.text)
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Batch upload failed: {str(e)}")
-                retry = input("Batch upload failed. Would you like to retry? (y/n): ")
-                if retry.lower() != 'y':
+            for attempt in range(1, max_retries + 1):
+                try:
+                    attempt_msg = f" (attempt {attempt}/{max_retries})" if attempt > 1 else ""
+                    console.print(f"Processing batch {i}/{len(batches)}{attempt_msg}")
+                    json_payload = json.dumps(batch)
+                    response = requests.post(url, data=json_payload, headers=self.headers)
+                    response.raise_for_status()
+                    responses.append(
+                        response.json() if 'application/json' in response.headers.get('Content-Type', '')
+                        else response.text
+                    )
                     break
+                except requests.exceptions.RequestException as e:
+                    logger.error(f"Batch {i} upload failed (attempt {attempt}/{max_retries}): {str(e)}")
+                    if attempt >= max_retries:
+                        logger.error(f"Batch {i} failed after {max_retries} attempts. Aborting upload.")
+                        return None
+                    time.sleep(2 ** (attempt - 1))
 
         return responses
 
@@ -130,12 +141,20 @@ class FingerprintDevice:
             response = {'log': [], 'clock': []}
             three_month_ago = datetime.now() - timedelta(days=90)
 
+            dropped = 0
             for attendance in attendances:
                 if attendance.timestamp >= three_month_ago:
                     response['log'].append({
                         'employee_id': int(attendance.user_id),
                         'timestamp': attendance.timestamp.strftime("%Y-%m-%d %H:%M:%S")
                     })
+                else:
+                    dropped += 1
+            if dropped:
+                logger.warning(
+                    f"Dropped {dropped} attendance record(s) older than 90 days. "
+                    f"Device may not have been synced in a while."
+                )
 
             response['log'].sort(key=lambda x: x['timestamp'])
             df = pd.DataFrame(response['log'])
@@ -223,21 +242,63 @@ class AttendanceSystem:
     def upload_log(self):
         console.print("[cyan]Starting attendance log upload...")
         data = self.device.get_attendance_data()
-        if not data:
+        if data is None:
             logger.error("Failed to retrieve attendance data")
             return False
 
-        self.clear_log()
+        if not data['clock']:
+            console.print("[yellow]No attendance records to upload.")
+            return True
+
+        device_emp_ids = {c['employee_id'] for c in data['clock']}
+        existing = self.api.get_request('/records/employees')
+        if existing and 'records' in existing:
+            api_emp_ids = set()
+            for r in existing['records']:
+                try:
+                    api_emp_ids.add(int(r['id']))
+                except (TypeError, ValueError):
+                    continue
+            unknown = device_emp_ids - api_emp_ids
+            if unknown:
+                preview = ', '.join(str(i) for i in sorted(unknown)[:10])
+                suffix = '...' if len(unknown) > 10 else ''
+                logger.warning(
+                    f"{len(unknown)} device employee_id(s) not in API: {preview}{suffix}. "
+                    f"Run 'Import Employee Data' first, or these clocks may be rejected by the server."
+                )
 
         if self.company_id:
             for clock in data['clock']:
                 clock['company_id'] = self.company_id
 
         result = self.api.post_request('/records/clocks', payload=data['clock'])
-        return result is not None
+        if result is None:
+            logger.error(
+                "Upload to API failed. Device log NOT cleared to prevent data loss. "
+                "Re-run 'Import Attendance Data' to retry."
+            )
+            return False
+
+        cleared = self.clear_log()
+        if cleared is None:
+            logger.warning(
+                "Upload succeeded but device log clear request failed. "
+                "Records may be re-uploaded on the next run (server may dedupe)."
+            )
+        return True
 
 
 CONFIG_FILE = 'config.json'
+
+
+def get_config_path():
+    if getattr(sys, 'frozen', False):
+        exe_dir = os.path.dirname(sys.executable)
+        config_path = os.path.join(exe_dir, CONFIG_FILE)
+        if os.path.exists(config_path):
+            return config_path
+    return CONFIG_FILE
 
 DEFAULT_CONFIG = {
     "device_ip": "10.10.3.226",
@@ -249,8 +310,9 @@ DEFAULT_CONFIG = {
 
 
 def load_config():
+    config_path = get_config_path()
     try:
-        with open(CONFIG_FILE, 'r') as f:
+        with open(config_path, 'r') as f:
             config = json.load(f)
             for key, value in DEFAULT_CONFIG.items():
                 if key not in config:

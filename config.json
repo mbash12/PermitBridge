@@ -1,7 +1,7 @@
 {
-  "device_ip": "10.10.3.226",
+  "device_ip": "10.10.2.117",
   "device_port": 4370,
-  "api_base_url": "https://accounting.wismaatlet.id/api/v1",
+  "api_base_url": "https://permithub.dotcomsolution.co.id/api/v1",
   "api_key": "GDb5Yd5P2t2qEXj5jx4R6XEy",
   "company_id": 12
 }
