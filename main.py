@@ -62,21 +62,28 @@ class MyRequests:
         batch_size = 100
         batches = [payload[i:i + batch_size] for i in range(0, len(payload), batch_size)]
         responses = []
+        max_retries = 3
 
-        console.print("[cyan]Uploading data in batches...")
+        console.print(f"[cyan]Uploading {len(payload)} records in {len(batches)} batch(es)...")
         for i, batch in enumerate(batches, 1):
-            try:
-                console.print(f"Processing batch {i}/{len(batches)}")
-                json_payload = json.dumps(batch)
-                response = requests.post(url, data=json_payload, headers=self.headers)
-                response.raise_for_status()
-                responses.append(response.json() if 'application/json' in response.headers.get('Content-Type',
-                                                                                               '') else response.text)
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Batch upload failed: {str(e)}")
-                retry = input("Batch upload failed. Would you like to retry? (y/n): ")
-                if retry.lower() != 'y':
+            retries = 0
+            while retries <= max_retries:
+                try:
+                    console.print(f"  Batch {i}/{len(batches)} ({len(batch)} records)")
+                    json_payload = json.dumps(batch)
+                    response = requests.post(url, data=json_payload, headers=self.headers)
+                    response.raise_for_status()
+                    responses.append(response.json() if 'application/json' in response.headers.get('Content-Type',
+                                                                                                    '') else response.text)
                     break
+                except requests.exceptions.RequestException as e:
+                    retries += 1
+                    if retries <= max_retries:
+                        logger.warning(f"Batch {i} failed (attempt {retries}/{max_retries}), retrying...")
+                        time.sleep(2)
+                    else:
+                        logger.error(f"Batch {i} failed after {max_retries} retries: {str(e)}")
+                        return None
 
         return responses
 
@@ -151,7 +158,7 @@ class FingerprintDevice:
                     if thedate is None or (
                             thedate.lower() == 'today' and date == datetime.today().strftime('%Y-%m-%d')):
                         response['clock'].append({
-                            'employee_id': row['employee_id'],
+                            'employee_id': int(row['employee_id']),
                             'date': date,
                             'clock_in': row['clock_in'].strftime('%Y-%m-%d %H:%M:%S'),
                             'clock_out': row['clock_out'].strftime('%Y-%m-%d %H:%M:%S')
@@ -173,7 +180,7 @@ class FingerprintDevice:
         try:
             console.print("[cyan]Fetching employee data...")
             users = self.zk.get_users()
-            return [{'id': user.user_id, 'name': user.name} for user in users]
+            return [{'id': int(user.user_id), 'name': user.name} for user in users]
         except Exception as e:
             logger.error(f"Error fetching employee data: {str(e)}")
             return None
